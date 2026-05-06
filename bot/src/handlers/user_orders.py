@@ -10,6 +10,7 @@ from src.database import SessionLocal
 from src.keyboards.admin_keyboards import admin_order_keyboard
 from src.keyboards.user_keyboards import (
     approved_order_keyboard,
+    draft_order_menu_keyboard,
     order_menu_keyboard,
     payment_keyboard,
     user_orders_keyboard,
@@ -45,27 +46,57 @@ FIELD_STATES = {
 
 
 @router.callback_query(F.data == "order:create")
-async def create_order(callback: CallbackQuery) -> None:
+async def create_order(callback: CallbackQuery, state: FSMContext) -> None:
     if not callback.from_user or not callback.message:
         await callback.answer("Не удалось создать заявку.", show_alert=True)
         return
 
-    # Создаем новый draft или возвращаем уже существующий draft пользователя.
-    # Заявка сразу хранится в PostgreSQL, в памяти ничего не держим.
+    draft = {
+        "address": None,
+        "product_type": None,
+        "size": None,
+        "link": None,
+        "photo_file_id": None,
+        "comment": None,
+    }
+    await state.clear()
+    await state.update_data(draft=draft)
+
     async with SessionLocal() as session:
         service = OrderService(session)
-        order = await service.create_draft(callback.from_user)
         try:
             await callback.message.edit_text(
-                service.format_order_menu(order),
-                reply_markup=order_menu_keyboard(order.id),
+                service.format_draft_menu(draft),
+                reply_markup=draft_order_menu_keyboard(),
             )
         except TelegramBadRequest:
             await callback.message.answer(
-                service.format_order_menu(order),
-                reply_markup=order_menu_keyboard(order.id),
+                service.format_draft_menu(draft),
+                reply_markup=draft_order_menu_keyboard(),
             )
 
+    await callback.answer()
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("draft:edit:"))
+async def edit_draft_field(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data or not callback.message:
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    field = callback.data.rsplit(":", 1)[-1]
+    if field not in FIELD_STATES:
+        await callback.answer("Некорректное поле заявки.", show_alert=True)
+        return
+
+    await state.update_data(
+        field=field,
+        menu_chat_id=callback.message.chat.id,
+        menu_message_id=callback.message.message_id,
+    )
+    await state.set_state(FIELD_STATES[field])
+    prompt_message = await callback.message.answer(FIELD_PROMPTS[field])
+    await state.update_data(prompt_message_id=prompt_message.message_id)
     await callback.answer()
 
 
@@ -120,12 +151,24 @@ async def edit_order_field(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(OrderForm.comment)
 async def save_text_field(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    order_id = int(data["order_id"])
     field = str(data["field"])
 
     if not message.from_user or not message.text:
         await message.answer("Отправьте текстовое значение.")
         return
+
+    draft = data.get("draft")
+    if isinstance(draft, dict):
+        draft[field] = message.text.strip()
+        await state.update_data(draft=draft)
+        async with SessionLocal() as session:
+            service = OrderService(session)
+            await _edit_source_draft_menu(message, state, service, draft)
+        await _cleanup_field_messages(message, state)
+        await state.update_data(draft=draft)
+        return
+
+    order_id = int(data["order_id"])
 
     # Сохраняем введенный текст в конкретное поле заявки.
     # Поле берется из FSMContext, поэтому один handler обслуживает сразу
@@ -157,8 +200,20 @@ async def save_photo_field(message: Message, state: FSMContext) -> None:
         return
 
     data = await state.get_data()
-    order_id = int(data["order_id"])
     photo_file_id = message.photo[-1].file_id
+
+    draft = data.get("draft")
+    if isinstance(draft, dict):
+        draft["photo_file_id"] = photo_file_id
+        await state.update_data(draft=draft)
+        async with SessionLocal() as session:
+            service = OrderService(session)
+            await _edit_source_draft_menu(message, state, service, draft)
+        await _cleanup_field_messages(message, state)
+        await state.update_data(draft=draft)
+        return
+
+    order_id = int(data["order_id"])
 
     # Берем самое большое фото из массива Telegram и сохраняем file_id.
     # Сам файл не скачиваем: Telegram file_id достаточно для повторной отправки.
@@ -232,6 +287,60 @@ async def submit_order(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data == "draft:submit")
+async def submit_draft_order(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.from_user or not callback.message:
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    draft = data.get("draft")
+    if not isinstance(draft, dict):
+        await callback.answer("Черновик не найден.", show_alert=True)
+        return
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        missing_fields = service.get_missing_required_draft_fields(draft)
+        if missing_fields:
+            await callback.answer(
+                "Заполните обязательные поля: " + ", ".join(missing_fields),
+                show_alert=True,
+            )
+            return
+
+        order = await service.create_from_draft(callback.from_user, draft)
+        admin_text = service.format_admin_order(order)
+        admin_keyboard = admin_order_keyboard(order.id, order.user_id)
+
+    if order.photo_file_id:
+        await bot.send_photo(
+            chat_id=settings.admin_chat_id,
+            photo=order.photo_file_id,
+            caption=admin_text,
+            reply_markup=admin_keyboard,
+        )
+    else:
+        await bot.send_message(
+            chat_id=settings.admin_chat_id,
+            text=admin_text,
+            reply_markup=admin_keyboard,
+        )
+
+    await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
+    await callback.message.answer("Заявка отправлена администраторам.")
+    await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data == "draft:cancel")
+async def cancel_unsent_draft(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message:
+        await callback.message.edit_text("Заявка отменена.")
+    await state.clear()
+    await callback.answer()
+
+
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("order:cancel:"))
 async def cancel_draft(callback: CallbackQuery) -> None:
     if not callback.data or not callback.from_user:
@@ -272,19 +381,23 @@ async def user_reject_approved_order(callback: CallbackQuery) -> None:
     async with SessionLocal() as session:
         service = OrderService(session)
         try:
-            order = await service.cancel_after_approval(order_id, callback.from_user.id)
+            order = await service.cancel_after_approval(
+                order_id,
+                callback.from_user.id,
+            )
         except ValueError as error:
             await callback.answer(str(error), show_alert=True)
             return
+
+        user_text = service.format_order_menu(order)
 
     await bot.send_message(
         chat_id=settings.admin_chat_id,
         text=f"Пользователь отказался от заявки #{order.id}.",
     )
+
     if callback.message:
-        async with SessionLocal() as session:
-            service = OrderService(session)
-            await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
+        await callback.message.edit_text(user_text, reply_markup=None)
     await callback.answer()
 
 
@@ -460,6 +573,37 @@ async def _edit_source_order_menu(
         await message.answer(
             service.format_order_menu(order),
             reply_markup=order_menu_keyboard(order.id),
+        )
+
+
+async def _edit_source_draft_menu(
+    message: Message,
+    state: FSMContext,
+    service: OrderService,
+    draft: dict,
+) -> None:
+    data = await state.get_data()
+    chat_id = data.get("menu_chat_id")
+    message_id = data.get("menu_message_id")
+
+    if not chat_id or not message_id:
+        await message.answer(
+            service.format_draft_menu(draft),
+            reply_markup=draft_order_menu_keyboard(),
+        )
+        return
+
+    try:
+        await bot.edit_message_text(
+            chat_id=int(chat_id),
+            message_id=int(message_id),
+            text=service.format_draft_menu(draft),
+            reply_markup=draft_order_menu_keyboard(),
+        )
+    except TelegramBadRequest:
+        await message.answer(
+            service.format_draft_menu(draft),
+            reply_markup=draft_order_menu_keyboard(),
         )
 
 async def _cleanup_field_messages(message: Message, state: FSMContext) -> None:

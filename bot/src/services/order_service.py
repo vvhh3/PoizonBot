@@ -38,6 +38,18 @@ class OrderService:
     async def get_stats(self) -> dict[str, int]:
         return await self.repository.count_by_status()
 
+    async def create_from_draft(self, user: User, draft: dict) -> Order:
+        return await self.repository.create_sent(
+            user_id=user.id,
+            username=user.username,
+            address=draft.get("address"),
+            product_type=draft.get("product_type"),
+            size=draft.get("size"),
+            link=draft.get("link"),
+            photo_file_id=draft.get("photo_file_id"),
+            comment=draft.get("comment"),
+        )
+
     async def update_draft_field(
         self,
         order_id: int,
@@ -89,7 +101,11 @@ class OrderService:
             processed_at=datetime.now(timezone.utc),
         )
 
-    async def cancel_after_approval(self, order_id: int, user_id: int) -> Order:
+    async def cancel_after_approval(
+        self,
+        order_id: int,
+        user_id: int,
+    ) -> Order:
         order = await self.repository.get_by_id(order_id)
         if not order or order.user_id != user_id:
             raise ValueError("Заявка не найдена.")
@@ -124,6 +140,30 @@ class OrderService:
             missing.append("ссылка или фото")
         return missing
 
+    def get_missing_required_draft_fields(self, draft: dict) -> list[str]:
+        missing = []
+        if not draft.get("address"):
+            missing.append("адрес")
+        if not draft.get("product_type"):
+            missing.append("тип товара")
+        if not draft.get("size"):
+            missing.append("размер")
+        if not draft.get("link") and not draft.get("photo_file_id"):
+            missing.append("ссылка или фото")
+        return missing
+
+    def format_draft_menu(self, draft: dict) -> str:
+        return (
+            "<b>Ваша заявка</b>\n\n"
+            "Статус: черновик\n"
+            f"Адрес: {self._value(draft.get('address'))}\n"
+            f"Тип товара: {self._value(draft.get('product_type'))}\n"
+            f"Размер: {self._value(draft.get('size'))}\n"
+            f"Ссылка: {self._value(draft.get('link'))}\n"
+            f"Фото: {'загружено' if draft.get('photo_file_id') else 'не загружено'}\n"
+            f"Комментарий: {self._value(draft.get('comment'))}"
+        )
+
     def format_order_menu(self, order: Order) -> str:
         return (
             "<b>Ваша заявка</b>\n\n"
@@ -149,6 +189,7 @@ class OrderService:
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'есть' if order.photo_file_id else 'нет'}\n"
             f"Комментарий: {self._value(order.comment)}\n"
+            f"Причина решения: {self._value(order.admin_comment)}\n"
             f"Статус: {self._status_title(order.status)}\n"
             f"Решение принял: {self._processed_by(order)}\n"
             f"Когда обработана: {self._processed_at(order)}"

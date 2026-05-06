@@ -21,6 +21,33 @@ class OrderRepository:
         await self.session.refresh(order)
         return order
 
+    async def create_sent(
+        self,
+        user_id: int,
+        username: str | None,
+        address: str | None,
+        product_type: str | None,
+        size: str | None,
+        link: str | None,
+        photo_file_id: str | None,
+        comment: str | None,
+    ) -> Order:
+        order = Order(
+            user_id=user_id,
+            username=username,
+            address=address,
+            product_type=product_type,
+            size=size,
+            link=link,
+            photo_file_id=photo_file_id,
+            comment=comment,
+            status=OrderStatus.SENT_TO_ADMIN.value,
+        )
+        self.session.add(order)
+        await self.session.commit()
+        await self.session.refresh(order)
+        return order
+
     async def get_by_id(self, order_id: int) -> Order | None:
         return await self.session.get(Order, order_id)
 

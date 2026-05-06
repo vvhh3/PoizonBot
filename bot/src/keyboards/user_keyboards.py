@@ -48,6 +48,27 @@ def order_menu_keyboard(order_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def draft_order_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Адрес", callback_data="draft:edit:address"),
+                InlineKeyboardButton(text="Тип товара", callback_data="draft:edit:product_type"),
+            ],
+            [
+                InlineKeyboardButton(text="Размер", callback_data="draft:edit:size"),
+                InlineKeyboardButton(text="Ссылка", callback_data="draft:edit:link"),
+            ],
+            [
+                InlineKeyboardButton(text="Фото", callback_data="draft:edit:photo"),
+                InlineKeyboardButton(text="Комментарий", callback_data="draft:edit:comment"),
+            ],
+            [InlineKeyboardButton(text="Отправить заявку", callback_data="draft:submit")],
+            [InlineKeyboardButton(text="Отменить заявку", callback_data="draft:cancel")],
+        ]
+    )
+
+
 def approved_order_keyboard(order_id: int, payment_url: str | None = None) -> InlineKeyboardMarkup:
     payment_button = (
         InlineKeyboardButton(text="Оплатить", url=payment_url)
