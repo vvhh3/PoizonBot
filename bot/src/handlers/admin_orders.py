@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -40,6 +41,12 @@ async def approve_order(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.update_data(order_id=order_id)
+    if callback.message:
+        await state.update_data(
+            admin_message_chat_id=callback.message.chat.id,
+            admin_message_id=callback.message.message_id,
+            admin_message_has_photo=bool(callback.message.photo),
+        )
     await state.set_state(AdminOrderForm.price)
 
     if callback.message:
@@ -71,19 +78,21 @@ async def save_admin_price(message: Message, state: FSMContext) -> None:
     async with SessionLocal() as session:
         service = OrderService(session)
         try:
-            order = await service.set_admin_price(order_id, int(raw_price))
+            order = await service.set_admin_price(order_id, int(raw_price), message.from_user)
         except ValueError as error:
             await message.answer(str(error))
             await state.clear()
             return
 
         user_text = service.format_user_approval(order)
+        admin_text = service.format_admin_order(order)
 
     await bot.send_message(
         chat_id=order.user_id,
         text=user_text,
         reply_markup=approved_order_keyboard(order.id),
     )
+    await _edit_admin_order_card(state, admin_text)
     await message.answer(f"Заявка #{order.id} одобрена, цена отправлена пользователю.")
     await state.clear()
 
@@ -102,6 +111,12 @@ async def reject_order(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.update_data(order_id=order_id)
+    if callback.message:
+        await state.update_data(
+            admin_message_chat_id=callback.message.chat.id,
+            admin_message_id=callback.message.message_id,
+            admin_message_has_photo=bool(callback.message.photo),
+        )
     await state.set_state(AdminOrderForm.reject_reason)
 
     if callback.message:
@@ -128,15 +143,17 @@ async def save_reject_reason(message: Message, state: FSMContext) -> None:
     async with SessionLocal() as session:
         service = OrderService(session)
         try:
-            order = await service.reject_by_admin(order_id, message.text.strip())
+            order = await service.reject_by_admin(order_id, message.text.strip(), message.from_user)
         except ValueError as error:
             await message.answer(str(error))
             await state.clear()
             return
 
         user_text = service.format_user_rejection(order)
+        admin_text = service.format_admin_order(order)
 
     await bot.send_message(chat_id=order.user_id, text=user_text)
+    await _edit_admin_order_card(state, admin_text)
     await message.answer(f"Заявка #{order.id} отклонена, причина отправлена пользователю.")
     await state.clear()
 
@@ -167,3 +184,31 @@ def _parse_order_id(callback_data: str) -> int | None:
     if not raw_order_id.isdigit():
         return None
     return int(raw_order_id)
+
+
+async def _edit_admin_order_card(state: FSMContext, text: str) -> None:
+    data = await state.get_data()
+    chat_id = data.get("admin_message_chat_id")
+    message_id = data.get("admin_message_id")
+    has_photo = bool(data.get("admin_message_has_photo"))
+
+    if not chat_id or not message_id:
+        return
+
+    try:
+        if has_photo:
+            await bot.edit_message_caption(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                caption=text,
+                reply_markup=None,
+            )
+        else:
+            await bot.edit_message_text(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                text=text,
+                reply_markup=None,
+            )
+    except TelegramBadRequest:
+        return

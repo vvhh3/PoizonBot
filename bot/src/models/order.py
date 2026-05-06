@@ -41,6 +41,9 @@ class Order(Base):
     )
     admin_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed_by_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    processed_by_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     payment_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

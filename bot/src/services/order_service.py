@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from html import escape
 
 from aiogram.types import User
@@ -62,7 +63,7 @@ class OrderService:
         order = await self.repository.update(order, status=OrderStatus.SENT_TO_ADMIN.value)
         return order, []
 
-    async def set_admin_price(self, order_id: int, price: int) -> Order:
+    async def set_admin_price(self, order_id: int, price: int, admin: User) -> Order:
         # Одобрение на первом этапе фактически переводит заявку сразу
         # в waiting_payment, потому что пользователь уже может перейти к оплате.
         order = await self._get_admin_order(order_id)
@@ -72,14 +73,20 @@ class OrderService:
             admin_price=price,
             payment_url=payment_url,
             status=OrderStatus.WAITING_PAYMENT.value,
+            processed_by_id=admin.id,
+            processed_by_username=admin.username,
+            processed_at=datetime.now(timezone.utc),
         )
 
-    async def reject_by_admin(self, order_id: int, reason: str) -> Order:
+    async def reject_by_admin(self, order_id: int, reason: str, admin: User) -> Order:
         order = await self._get_admin_order(order_id)
         return await self.repository.update(
             order,
             admin_comment=reason,
             status=OrderStatus.REJECTED.value,
+            processed_by_id=admin.id,
+            processed_by_username=admin.username,
+            processed_at=datetime.now(timezone.utc),
         )
 
     async def cancel_after_approval(self, order_id: int, user_id: int) -> Order:
@@ -120,12 +127,15 @@ class OrderService:
     def format_order_menu(self, order: Order) -> str:
         return (
             "<b>Ваша заявка</b>\n\n"
+            f"Статус: {self._status_title(order.status)}\n"
             f"Адрес: {self._value(order.address)}\n"
             f"Тип товара: {self._value(order.product_type)}\n"
             f"Размер: {self._value(order.size)}\n"
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'загружено' if order.photo_file_id else 'не загружено'}\n"
-            f"Комментарий: {self._value(order.comment)}"
+            f"Комментарий: {self._value(order.comment)}\n"
+            f"Решение принял: {self._processed_by(order)}\n"
+            f"Когда обработана: {self._processed_at(order)}"
         )
 
     def format_admin_order(self, order: Order) -> str:
@@ -139,20 +149,27 @@ class OrderService:
             f"Размер: {self._value(order.size)}\n"
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'есть' if order.photo_file_id else 'нет'}\n"
-            f"Комментарий: {self._value(order.comment)}"
+            f"Комментарий: {self._value(order.comment)}\n"
+            f"Статус: {self._status_title(order.status)}\n"
+            f"Решение принял: {self._processed_by(order)}\n"
+            f"Когда обработана: {self._processed_at(order)}"
         )
 
     def format_user_approval(self, order: Order) -> str:
         return (
             "Ваша заявка одобрена.\n"
             f"Цена: {order.admin_price} ₽\n"
-            f"Комментарий администратора: {self._value(order.admin_comment)}"
+            f"Комментарий администратора: {self._value(order.admin_comment)}\n"
+            f"Решение принял: {self._processed_by(order)}\n"
+            f"Когда обработана: {self._processed_at(order)}"
         )
 
     def format_user_rejection(self, order: Order) -> str:
         return (
             "Ваша заявка отклонена.\n"
-            f"Причина: {self._value(order.admin_comment)}"
+            f"Причина: {self._value(order.admin_comment)}\n"
+            f"Решение принял: {self._processed_by(order)}\n"
+            f"Когда обработана: {self._processed_at(order)}"
         )
 
     def format_user_orders(self, orders: list[Order]) -> str:
@@ -209,3 +226,15 @@ class OrderService:
             OrderStatus.CANCELLED.value: "отменена",
         }
         return titles.get(status, status)
+
+    def _processed_by(self, order: Order) -> str:
+        if order.processed_by_username:
+            return escape(f"@{order.processed_by_username}")
+        if order.processed_by_id:
+            return f"<code>{order.processed_by_id}</code>"
+        return "ещё не назначен"
+
+    def _processed_at(self, order: Order) -> str:
+        if not order.processed_at:
+            return "ещё не обработана"
+        return order.processed_at.strftime("%d.%m.%Y %H:%M")

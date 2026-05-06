@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
 
 from src.config import settings
 from src.models.order import Base
@@ -21,6 +22,15 @@ async def create_tables() -> None:
     # Это удобно для первого этапа без отдельной системы миграций.
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.execute(
+            text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS processed_by_id BIGINT")
+        )
+        await connection.execute(
+            text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS processed_by_username VARCHAR(255)")
+        )
+        await connection.execute(
+            text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP WITH TIME ZONE")
+        )
 
 
 async def dispose_engine() -> None:

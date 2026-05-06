@@ -217,7 +217,8 @@ async def submit_order(callback: CallbackQuery) -> None:
             reply_markup=admin_keyboard,
         )
 
-    await callback.message.edit_text("Заявка отправлена администраторам.")
+    await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
+    await callback.message.answer("Заявка отправлена администраторам.")
     await callback.answer()
 
 
@@ -241,7 +242,9 @@ async def cancel_draft(callback: CallbackQuery) -> None:
             return
 
     if callback.message:
-        await callback.message.edit_text("Заявка отменена.")
+        async with SessionLocal() as session:
+            service = OrderService(session)
+            await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
     await callback.answer()
 
 
@@ -269,7 +272,9 @@ async def user_reject_approved_order(callback: CallbackQuery) -> None:
         text=f"Пользователь отказался от заявки #{order.id}.",
     )
     if callback.message:
-        await callback.message.edit_text("Заявка отменена.")
+        async with SessionLocal() as session:
+            service = OrderService(session)
+            await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
     await callback.answer()
 
 
