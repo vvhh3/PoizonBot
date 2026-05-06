@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Dispatcher
 from aiogram.types import ErrorEvent
+from sqlalchemy.exc import OperationalError
 
 from src.bot.loader import bot
 from src.database import create_tables, dispose_engine
@@ -22,7 +23,15 @@ async def main() -> None:
 
     # На первом этапе используем простое автосоздание таблиц.
     # Для production-проекта позже можно заменить это на Alembic-миграции.
-    await create_tables()
+    try:
+        await create_tables()
+    except (OSError, OperationalError) as error:
+        logger.error(
+            "Не удалось подключиться к PostgreSQL. "
+            "Проверь DATABASE_URL или запусти локальную БД командой: docker compose up -d db"
+        )
+        logger.debug("Database connection error", exc_info=True)
+        return
 
     # Dispatcher принимает входящие обновления Telegram и передает их в handlers.
     # Роутеры разделены по зонам ответственности: старт, пользовательские заявки,

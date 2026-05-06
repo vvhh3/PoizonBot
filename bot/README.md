@@ -62,10 +62,22 @@ ADMIN_USERNAME=admin_username
 Для тестов вне Railway `DATABASE_URL` можно не указывать. Тогда бот попробует подключиться к локальному PostgreSQL:
 
 ```text
-postgresql://postgres:postgres@localhost:5432/poizon_bot
+postgresql://postgres:postgres@127.0.0.1:5432/poizon_bot
 ```
 
 В этом случае локально должна существовать база `poizon_bot`, пользователь `postgres` с паролем `postgres`, и PostgreSQL должен быть запущен.
+
+Самый простой вариант для локального теста — поднять PostgreSQL через Docker из папки `bot`:
+
+```bash
+docker compose up -d db
+```
+
+После этого запускайте бота:
+
+```bash
+python -m src.main
+```
 
 Запустите бота из папки `bot`:
 

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     admin_chat_id: int = Field(alias="ADMIN_CHAT_ID")
     database_url: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/poizon_bot",
+        default="postgresql://postgres:postgres@127.0.0.1:5432/poizon_bot",
         alias="DATABASE_URL",
     )
     admin_username: str = Field(default="admin_username", alias="ADMIN_USERNAME")
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     @property
     def sqlalchemy_database_url(self) -> str:
         if not self.database_url.strip():
-            return "postgresql+asyncpg://postgres:postgres@localhost:5432/poizon_bot"
+            return "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/poizon_bot"
 
         # Railway и некоторые хостинги часто выдают DATABASE_URL в формате
         # postgresql:// или postgres://. Для SQLAlchemy async нужен драйвер
