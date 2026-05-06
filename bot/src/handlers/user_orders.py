@@ -314,7 +314,7 @@ async def my_orders_command(message: Message) -> None:
         service = OrderService(session)
         orders = await service.list_user_orders(message.from_user.id)
         await message.answer(
-            service.format_user_orders(orders),
+            "Выберите заявку:" if orders else "У вас пока нет заявок.",
             reply_markup=user_orders_keyboard(orders),
         )
 
@@ -328,8 +328,8 @@ async def my_orders_callback(callback: CallbackQuery) -> None:
     async with SessionLocal() as session:
         service = OrderService(session)
         orders = await service.list_user_orders(callback.from_user.id)
-        await callback.message.answer(
-            service.format_user_orders(orders),
+        await callback.message.edit_text(
+            "Выберите заявку:" if orders else "У вас пока нет заявок.",
             reply_markup=user_orders_keyboard(orders),
         )
 
@@ -349,18 +349,16 @@ async def view_order(callback: CallbackQuery) -> None:
 
     async with SessionLocal() as session:
         service = OrderService(session)
+        orders = await service.list_user_orders(callback.from_user.id)
         order = await service.get_order(order_id)
         if not order or order.user_id != callback.from_user.id:
             await callback.answer("Заявка не найдена.", show_alert=True)
             return
 
-        if order.status == "draft":
-            await callback.message.answer(
-                service.format_order_menu(order),
-                reply_markup=order_menu_keyboard(order.id),
-            )
-        else:
-            await callback.message.answer(service.format_order_menu(order))
+        await callback.message.edit_text(
+            service.format_order_menu(order),
+            reply_markup=user_orders_keyboard(orders, selected_order_id=order.id),
+        )
 
     await callback.answer()
 

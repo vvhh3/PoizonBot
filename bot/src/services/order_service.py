@@ -133,9 +133,7 @@ class OrderService:
             f"Размер: {self._value(order.size)}\n"
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'загружено' if order.photo_file_id else 'не загружено'}\n"
-            f"Комментарий: {self._value(order.comment)}\n"
-            f"Решение принял: {self._processed_by(order)}\n"
-            f"Когда обработана: {self._processed_at(order)}"
+            f"Комментарий: {self._value(order.comment)}"
         )
 
     def format_admin_order(self, order: Order) -> str:
@@ -157,19 +155,29 @@ class OrderService:
 
     def format_user_approval(self, order: Order) -> str:
         return (
-            "Ваша заявка одобрена.\n"
+            "<b>Ваша заявка одобрена</b>\n\n"
+            f"Статус: {self._status_title(order.status)}\n"
+            f"Адрес: {self._value(order.address)}\n"
+            f"Тип товара: {self._value(order.product_type)}\n"
+            f"Размер: {self._value(order.size)}\n"
+            f"Ссылка: {self._value(order.link)}\n"
+            f"Фото: {'загружено' if order.photo_file_id else 'не загружено'}\n"
+            f"Комментарий: {self._value(order.comment)}\n"
             f"Цена: {order.admin_price} ₽\n"
-            f"Комментарий администратора: {self._value(order.admin_comment)}\n"
-            f"Решение принял: {self._processed_by(order)}\n"
-            f"Когда обработана: {self._processed_at(order)}"
+            f"Комментарий администратора: {self._value(order.admin_comment)}"
         )
 
     def format_user_rejection(self, order: Order) -> str:
         return (
-            "Ваша заявка отклонена.\n"
-            f"Причина: {self._value(order.admin_comment)}\n"
-            f"Решение принял: {self._processed_by(order)}\n"
-            f"Когда обработана: {self._processed_at(order)}"
+            "<b>Ваша заявка отклонена</b>\n\n"
+            f"Статус: {self._status_title(order.status)}\n"
+            f"Адрес: {self._value(order.address)}\n"
+            f"Тип товара: {self._value(order.product_type)}\n"
+            f"Размер: {self._value(order.size)}\n"
+            f"Ссылка: {self._value(order.link)}\n"
+            f"Фото: {'загружено' if order.photo_file_id else 'не загружено'}\n"
+            f"Комментарий: {self._value(order.comment)}\n"
+            f"Причина: {self._value(order.admin_comment)}"
         )
 
     def format_user_orders(self, orders: list[Order]) -> str:

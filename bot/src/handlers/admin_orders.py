@@ -47,6 +47,7 @@ async def approve_order(callback: CallbackQuery, state: FSMContext) -> None:
             admin_message_id=callback.message.message_id,
             admin_message_has_photo=bool(callback.message.photo),
         )
+        await _remove_admin_order_buttons(callback.message)
     await state.set_state(AdminOrderForm.price)
 
     if callback.message:
@@ -117,6 +118,7 @@ async def reject_order(callback: CallbackQuery, state: FSMContext) -> None:
             admin_message_id=callback.message.message_id,
             admin_message_has_photo=bool(callback.message.photo),
         )
+        await _remove_admin_order_buttons(callback.message)
     await state.set_state(AdminOrderForm.reject_reason)
 
     if callback.message:
@@ -210,5 +212,16 @@ async def _edit_admin_order_card(state: FSMContext, text: str) -> None:
                 text=text,
                 reply_markup=None,
             )
+    except TelegramBadRequest:
+        return
+
+
+async def _remove_admin_order_buttons(message: Message) -> None:
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            reply_markup=None,
+        )
     except TelegramBadRequest:
         return

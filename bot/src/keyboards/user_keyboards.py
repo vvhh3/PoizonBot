@@ -75,12 +75,16 @@ def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
     )
 
 
-def user_orders_keyboard(orders: list[Order]) -> InlineKeyboardMarkup:
+def user_orders_keyboard(
+    orders: list[Order],
+    selected_order_id: int | None = None,
+) -> InlineKeyboardMarkup:
     rows = []
     for order in orders:
         title = order.product_type or "заявку"
+        prefix = "Выбрана" if order.id == selected_order_id else "Открыть"
         rows.append(
-            [InlineKeyboardButton(text=f"Открыть: {title}", callback_data=f"order:view:{order.id}")]
+            [InlineKeyboardButton(text=f"{prefix}: {title}", callback_data=f"order:view:{order.id}")]
         )
     rows.append([InlineKeyboardButton(text="Оформить заявку", callback_data="order:create")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
