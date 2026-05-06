@@ -31,6 +31,12 @@ class OrderService:
     async def get_order(self, order_id: int) -> Order | None:
         return await self.repository.get_by_id(order_id)
 
+    async def list_user_orders(self, user_id: int) -> list[Order]:
+        return await self.repository.list_by_user(user_id)
+
+    async def get_stats(self) -> dict[str, int]:
+        return await self.repository.count_by_status()
+
     async def update_draft_field(
         self,
         order_id: int,
@@ -113,7 +119,7 @@ class OrderService:
 
     def format_order_menu(self, order: Order) -> str:
         return (
-            f"<b>Заявка #{order.id}</b>\n\n"
+            "<b>Ваша заявка</b>\n\n"
             f"Адрес: {self._value(order.address)}\n"
             f"Тип товара: {self._value(order.product_type)}\n"
             f"Размер: {self._value(order.size)}\n"
@@ -138,16 +144,38 @@ class OrderService:
 
     def format_user_approval(self, order: Order) -> str:
         return (
-            f"Ваша заявка #{order.id} одобрена.\n"
+            "Ваша заявка одобрена.\n"
             f"Цена: {order.admin_price} ₽\n"
             f"Комментарий администратора: {self._value(order.admin_comment)}"
         )
 
     def format_user_rejection(self, order: Order) -> str:
         return (
-            f"Ваша заявка #{order.id} отклонена.\n"
+            "Ваша заявка отклонена.\n"
             f"Причина: {self._value(order.admin_comment)}"
         )
+
+    def format_user_orders(self, orders: list[Order]) -> str:
+        if not orders:
+            return "У вас пока нет заявок."
+
+        lines = ["<b>Ваши заявки</b>"]
+        for order in orders:
+            lines.append(
+                f"Статус: {self._status_title(order.status)}. "
+                f"Тип товара: {self._value(order.product_type)}. "
+                f"Размер: {self._value(order.size)}."
+            )
+        return "\n".join(lines)
+
+    def format_stats(self, stats: dict[str, int]) -> str:
+        total = sum(stats.values())
+        lines = [f"<b>Статистика заявок</b>", f"Всего: {total}"]
+
+        for status in OrderStatus:
+            lines.append(f"{self._status_title(status.value)}: {stats.get(status.value, 0)}")
+
+        return "\n".join(lines)
 
     async def _get_owned_draft(self, order_id: int, user_id: int) -> Order:
         order = await self.repository.get_by_id(order_id)
@@ -169,3 +197,15 @@ class OrderService:
         if value is None or value == "":
             return "не указан"
         return escape(str(value))
+
+    def _status_title(self, status: str) -> str:
+        titles = {
+            OrderStatus.DRAFT.value: "черновик",
+            OrderStatus.SENT_TO_ADMIN.value: "отправлена админам",
+            OrderStatus.APPROVED.value: "одобрена",
+            OrderStatus.REJECTED.value: "отклонена",
+            OrderStatus.WAITING_PAYMENT.value: "ожидает оплату",
+            OrderStatus.PAID.value: "оплачена",
+            OrderStatus.CANCELLED.value: "отменена",
+        }
+        return titles.get(status, status)

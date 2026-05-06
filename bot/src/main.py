@@ -2,10 +2,12 @@ import asyncio
 import logging
 
 from aiogram import Dispatcher
+from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from aiogram.types import ErrorEvent
 from sqlalchemy.exc import OperationalError
 
 from src.bot.loader import bot
+from src.config import settings
 from src.database import create_tables, dispose_engine
 from src.handlers import admin_orders, start, user_orders
 
@@ -33,6 +35,8 @@ async def main() -> None:
         logger.debug("Database connection error", exc_info=True)
         return
 
+    await setup_bot_commands()
+
     # Dispatcher принимает входящие обновления Telegram и передает их в handlers.
     # Роутеры разделены по зонам ответственности: старт, пользовательские заявки,
     # админские действия по заявкам.
@@ -58,6 +62,26 @@ async def main() -> None:
         # Корректно закрываем HTTP-сессию Telegram Bot API и соединения с БД.
         await bot.session.close()
         await dispose_engine()
+
+
+async def setup_bot_commands() -> None:
+    # Эти команды Telegram показывает при нажатии на значок "/" в поле ввода.
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Открыть меню"),
+            BotCommand(command="orders", description="Посмотреть свои заявки"),
+        ],
+        scope=BotCommandScopeDefault(),
+    )
+
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Открыть меню"),
+            BotCommand(command="orders", description="Посмотреть свои заявки"),
+            BotCommand(command="stats", description="Статистика заявок"),
+        ],
+        scope=BotCommandScopeChat(chat_id=settings.admin_chat_id),
+    )
 
 
 if __name__ == "__main__":

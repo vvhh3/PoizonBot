@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -11,6 +12,18 @@ from src.states.order_states import AdminOrderForm
 
 
 router = Router(name="admin_orders")
+
+
+@router.message(Command("stats"), F.chat.id == settings.admin_chat_id)
+async def stats_command(message: Message) -> None:
+    if not _is_admin_message(message):
+        await message.answer("Недостаточно прав.")
+        return
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        stats = await service.get_stats()
+        await message.answer(service.format_stats(stats))
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("admin:approve:"))
@@ -36,6 +49,11 @@ async def approve_order(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(AdminOrderForm.price, F.chat.id == settings.admin_chat_id)
 async def save_admin_price(message: Message, state: FSMContext) -> None:
+    if not _is_admin_message(message):
+        await message.answer("Недостаточно прав.")
+        await state.clear()
+        return
+
     if not message.text:
         await message.answer("Введите цену числом.")
         return
@@ -93,6 +111,11 @@ async def reject_order(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(AdminOrderForm.reject_reason, F.chat.id == settings.admin_chat_id)
 async def save_reject_reason(message: Message, state: FSMContext) -> None:
+    if not _is_admin_message(message):
+        await message.answer("Недостаточно прав.")
+        await state.clear()
+        return
+
     if not message.text:
         await message.answer("Введите причину текстом.")
         return
@@ -119,7 +142,24 @@ async def save_reject_reason(message: Message, state: FSMContext) -> None:
 
 
 def _is_admin_callback(callback: CallbackQuery) -> bool:
-    return bool(callback.message and callback.message.chat.id == settings.admin_chat_id)
+    if not callback.message or callback.message.chat.id != settings.admin_chat_id:
+        return False
+    if not callback.from_user:
+        return False
+    return _is_admin_user(callback.from_user.id)
+
+
+def _is_admin_message(message: Message) -> bool:
+    if message.chat.id != settings.admin_chat_id or not message.from_user:
+        return False
+    return _is_admin_user(message.from_user.id)
+
+
+def _is_admin_user(user_id: int) -> bool:
+    admin_ids = settings.admin_ids_list
+    if not admin_ids:
+        return True
+    return user_id in admin_ids
 
 
 def _parse_order_id(callback_data: str) -> int | None:

@@ -1,6 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.config import settings
+from src.models.order import Order
 
 
 def start_keyboard() -> InlineKeyboardMarkup:
@@ -11,7 +12,13 @@ def start_keyboard() -> InlineKeyboardMarkup:
                     text="Оформить заявку",
                     callback_data="order:create",
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Мои заявки",
+                    callback_data="order:list",
+                )
+            ],
         ]
     )
 
@@ -66,6 +73,17 @@ def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Связаться с админом", callback_data="contact:admin")],
         ]
     )
+
+
+def user_orders_keyboard(orders: list[Order]) -> InlineKeyboardMarkup:
+    rows = []
+    for order in orders:
+        title = order.product_type or "заявку"
+        rows.append(
+            [InlineKeyboardButton(text=f"Открыть: {title}", callback_data=f"order:view:{order.id}")]
+        )
+    rows.append([InlineKeyboardButton(text="Оформить заявку", callback_data="order:create")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def contact_admin_text() -> str:

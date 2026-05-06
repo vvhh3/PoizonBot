@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
     admin_username: str = Field(default="admin_username", alias="ADMIN_USERNAME")
+    admin_ids: str = Field(default="", alias="ADMIN_IDS")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -32,6 +33,17 @@ class Settings(BaseSettings):
         if self.database_url.startswith("postgresql://"):
             return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return self.database_url
+
+    @property
+    def admin_ids_list(self) -> list[int]:
+        # ADMIN_IDS задается строкой через запятую: 123,456,789.
+        # Если список пустой, бот проверяет только ADMIN_CHAT_ID.
+        result = []
+        for raw_id in self.admin_ids.split(","):
+            raw_id = raw_id.strip()
+            if raw_id.lstrip("-").isdigit():
+                result.append(int(raw_id))
+        return result
 
 
 # Единственный объект настроек, который импортируется в остальных модулях.
