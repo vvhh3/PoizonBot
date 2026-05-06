@@ -71,6 +71,7 @@ def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Перейти к оплате", url=payment_url)],
             [InlineKeyboardButton(text="Связаться с админом", callback_data="contact:admin")],
+            [InlineKeyboardButton(text="Назад", callback_data="payment:back")],
         ]
     )
 

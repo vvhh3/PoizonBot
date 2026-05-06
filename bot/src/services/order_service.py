@@ -127,6 +127,7 @@ class OrderService:
     def format_order_menu(self, order: Order) -> str:
         return (
             "<b>Ваша заявка</b>\n\n"
+            f"ID заявки: <code>{order.id}</code>\n"
             f"Статус: {self._status_title(order.status)}\n"
             f"Адрес: {self._value(order.address)}\n"
             f"Тип товара: {self._value(order.product_type)}\n"
@@ -156,6 +157,7 @@ class OrderService:
     def format_user_approval(self, order: Order) -> str:
         return (
             "<b>Ваша заявка одобрена</b>\n\n"
+            f"ID заявки: <code>{order.id}</code>\n"
             f"Статус: {self._status_title(order.status)}\n"
             f"Адрес: {self._value(order.address)}\n"
             f"Тип товара: {self._value(order.product_type)}\n"
@@ -170,6 +172,7 @@ class OrderService:
     def format_user_rejection(self, order: Order) -> str:
         return (
             "<b>Ваша заявка отклонена</b>\n\n"
+            f"ID заявки: <code>{order.id}</code>\n"
             f"Статус: {self._status_title(order.status)}\n"
             f"Адрес: {self._value(order.address)}\n"
             f"Тип товара: {self._value(order.product_type)}\n"

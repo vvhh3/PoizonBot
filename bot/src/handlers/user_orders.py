@@ -9,6 +9,7 @@ from src.config import settings
 from src.database import SessionLocal
 from src.keyboards.admin_keyboards import admin_order_keyboard
 from src.keyboards.user_keyboards import (
+    approved_order_keyboard,
     order_menu_keyboard,
     payment_keyboard,
     user_orders_keyboard,
@@ -54,10 +55,16 @@ async def create_order(callback: CallbackQuery) -> None:
     async with SessionLocal() as session:
         service = OrderService(session)
         order = await service.create_draft(callback.from_user)
-        await callback.message.answer(
-            service.format_order_menu(order),
-            reply_markup=order_menu_keyboard(order.id),
-        )
+        try:
+            await callback.message.edit_text(
+                service.format_order_menu(order),
+                reply_markup=order_menu_keyboard(order.id),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                service.format_order_menu(order),
+                reply_markup=order_menu_keyboard(order.id),
+            )
 
     await callback.answer()
 
@@ -101,7 +108,8 @@ async def edit_order_field(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(FIELD_STATES[field])
 
     if callback.message:
-        await callback.message.answer(FIELD_PROMPTS[field])
+        prompt_message = await callback.message.answer(FIELD_PROMPTS[field])
+        await state.update_data(prompt_message_id=prompt_message.message_id)
     await callback.answer()
 
 
@@ -137,6 +145,7 @@ async def save_text_field(message: Message, state: FSMContext) -> None:
             return
 
         await _edit_source_order_menu(message, state, service, order)
+        await _cleanup_field_messages(message, state)
 
     await state.clear()
 
@@ -168,6 +177,7 @@ async def save_photo_field(message: Message, state: FSMContext) -> None:
             return
 
         await _edit_source_order_menu(message, state, service, order)
+        await _cleanup_field_messages(message, state)
 
     await state.clear()
 
@@ -279,7 +289,7 @@ async def user_reject_approved_order(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("order:pay:"))
-async def pay_order(callback: CallbackQuery) -> None:
+async def pay_order(callback: CallbackQuery, state: FSMContext) -> None:
     if not callback.data or not callback.from_user or not callback.message:
         await callback.answer("Некорректная команда.", show_alert=True)
         return
@@ -297,10 +307,62 @@ async def pay_order(callback: CallbackQuery) -> None:
             await callback.answer(str(error), show_alert=True)
             return
 
+        order_text = service.format_user_approval(order)
+
+    await callback.message.edit_text(order_text, reply_markup=None)
     await callback.message.answer(
-        "Оплата заявки.",
+        f"Оплата заявки <code>{order.id}</code>.",
         reply_markup=payment_keyboard(order.payment_url or ""),
     )
+    await state.update_data(
+        payment_order_id=order.id,
+        payment_order_chat_id=callback.message.chat.id,
+        payment_order_message_id=callback.message.message_id,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "payment:back")
+async def payment_back(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.message or not callback.from_user:
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    order_id = data.get("payment_order_id")
+    order_message_id = data.get("payment_order_message_id")
+    order_chat_id = data.get("payment_order_chat_id")
+
+    if not order_id or not order_message_id or not order_chat_id:
+        try:
+            await callback.message.delete()
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        order = await service.get_order(int(order_id))
+        if not order or order.user_id != callback.from_user.id:
+            await callback.answer("Заявка не найдена.", show_alert=True)
+            return
+
+        try:
+            await bot.edit_message_text(
+                chat_id=int(order_chat_id),
+                message_id=int(order_message_id),
+                text=service.format_user_approval(order),
+                reply_markup=approved_order_keyboard(order.id),
+            )
+        except TelegramBadRequest:
+            pass
+
+    try:
+        await callback.message.delete()
+    except TelegramBadRequest:
+        pass
+    await state.clear()
     await callback.answer()
 
 
@@ -400,4 +462,17 @@ async def _edit_source_order_menu(
             reply_markup=order_menu_keyboard(order.id),
         )
 
-    await message.answer("Сохранено.")
+async def _cleanup_field_messages(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    prompt_message_id = data.get("prompt_message_id")
+
+    if prompt_message_id:
+        try:
+            await bot.delete_message(message.chat.id, int(prompt_message_id))
+        except TelegramBadRequest:
+            pass
+
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass

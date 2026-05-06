@@ -7,12 +7,27 @@ from aiogram.types import CallbackQuery, Message
 from src.bot.loader import bot
 from src.config import settings
 from src.database import SessionLocal
+from src.keyboards.admin_keyboards import (
+    admin_cancel_action_keyboard,
+    admin_order_keyboard,
+    admin_reject_reasons_keyboard,
+)
 from src.keyboards.user_keyboards import approved_order_keyboard
 from src.services.order_service import OrderService
 from src.states.order_states import AdminOrderForm
 
 
 router = Router(name="admin_orders")
+
+REJECT_REASONS = {
+    "rules": "Не прошёл правила",
+    "insults": "Оскорбления запрещены",
+    "spam": "Флуд / спам",
+    "forbidden": "Запрещённый контент",
+    "no_reason": "Без причины",
+    "offtopic": "Не по теме",
+    "bad_data": "Некорректные данные",
+}
 
 
 @router.message(Command("stats"), F.chat.id == settings.admin_chat_id)
@@ -51,7 +66,11 @@ async def approve_order(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AdminOrderForm.price)
 
     if callback.message:
-        await callback.message.answer(f"Введите цену для заявки #{order_id} в рублях.")
+        action_message = await callback.message.answer(
+            f"Введите цену для заявки #{order_id} в рублях.",
+            reply_markup=admin_cancel_action_keyboard(order_id),
+        )
+        await state.update_data(action_message_id=action_message.message_id)
     await callback.answer()
 
 
@@ -94,6 +113,7 @@ async def save_admin_price(message: Message, state: FSMContext) -> None:
         reply_markup=approved_order_keyboard(order.id),
     )
     await _edit_admin_order_card(state, admin_text)
+    await _delete_action_message(message, state)
     await message.answer(f"Заявка #{order.id} одобрена, цена отправлена пользователю.")
     await state.clear()
 
@@ -119,11 +139,74 @@ async def reject_order(callback: CallbackQuery, state: FSMContext) -> None:
             admin_message_has_photo=bool(callback.message.photo),
         )
         await _remove_admin_order_buttons(callback.message)
-    await state.set_state(AdminOrderForm.reject_reason)
-
     if callback.message:
-        await callback.message.answer(f"Введите причину отклонения заявки #{order_id}.")
+        action_message = await callback.message.answer(
+            f"Выберите причину отклонения заявки #{order_id}.",
+            reply_markup=admin_reject_reasons_keyboard(order_id),
+        )
+        await state.update_data(action_message_id=action_message.message_id)
     await callback.answer()
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("admin:reject_reason:"))
+async def reject_order_by_reason(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+
+    if not callback.data:
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) != 4 or not parts[2].isdigit():
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    order_id = int(parts[2])
+    reason_code = parts[3]
+
+    if reason_code == "back":
+        await _cancel_admin_action(callback, state, order_id)
+        return
+
+    reason = REJECT_REASONS.get(reason_code)
+    if not reason:
+        await callback.answer("Некорректная причина.", show_alert=True)
+        return
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        try:
+            order = await service.reject_by_admin(order_id, reason, callback.from_user)
+        except ValueError as error:
+            await callback.answer(str(error), show_alert=True)
+            await state.clear()
+            return
+
+        user_text = service.format_user_rejection(order)
+        admin_text = service.format_admin_order(order)
+
+    await bot.send_message(chat_id=order.user_id, text=user_text)
+    await _edit_admin_order_card(state, admin_text)
+    if callback.message:
+        await _delete_message(callback.message)
+    await callback.answer("Заявка отклонена.")
+    await state.clear()
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("admin:cancel:"))
+async def cancel_admin_action(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+
+    order_id = _parse_order_id(callback.data or "")
+    if order_id is None:
+        await callback.answer("Некорректная заявка.", show_alert=True)
+        return
+
+    await _cancel_admin_action(callback, state, order_id)
 
 
 @router.message(AdminOrderForm.reject_reason, F.chat.id == settings.admin_chat_id)
@@ -156,6 +239,7 @@ async def save_reject_reason(message: Message, state: FSMContext) -> None:
 
     await bot.send_message(chat_id=order.user_id, text=user_text)
     await _edit_admin_order_card(state, admin_text)
+    await _delete_action_message(message, state)
     await message.answer(f"Заявка #{order.id} отклонена, причина отправлена пользователю.")
     await state.clear()
 
@@ -223,5 +307,58 @@ async def _remove_admin_order_buttons(message: Message) -> None:
             message_id=message.message_id,
             reply_markup=None,
         )
+    except TelegramBadRequest:
+        return
+
+
+async def _cancel_admin_action(
+    callback: CallbackQuery,
+    state: FSMContext,
+    order_id: int,
+) -> None:
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        order = await service.get_order(order_id)
+        if not order:
+            await callback.answer("Заявка не найдена.", show_alert=True)
+            await state.clear()
+            return
+
+    data = await state.get_data()
+    chat_id = data.get("admin_message_chat_id")
+    message_id = data.get("admin_message_id")
+
+    if chat_id and message_id:
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                reply_markup=admin_order_keyboard(order.id, order.user_id),
+            )
+        except TelegramBadRequest:
+            pass
+
+    if callback.message:
+        await _delete_message(callback.message)
+
+    await state.clear()
+    await callback.answer("Действие отменено.")
+
+
+async def _delete_action_message(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    action_message_id = data.get("action_message_id")
+    if not action_message_id:
+        return
+
+    try:
+        await bot.delete_message(message.chat.id, int(action_message_id))
+    except TelegramBadRequest:
+        return
+
+
+async def _delete_message(message: Message) -> None:
+    try:
+        await message.delete()
     except TelegramBadRequest:
         return
