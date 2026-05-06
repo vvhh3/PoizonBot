@@ -59,6 +59,14 @@ DATABASE_URL=postgresql://user:password@localhost:5432/poizon_bot
 ADMIN_USERNAME=admin_username
 ```
 
+Для тестов вне Railway `DATABASE_URL` можно не указывать. Тогда бот попробует подключиться к локальному PostgreSQL:
+
+```text
+postgresql://postgres:postgres@localhost:5432/poizon_bot
+```
+
+В этом случае локально должна существовать база `poizon_bot`, пользователь `postgres` с паролем `postgres`, и PostgreSQL должен быть запущен.
+
 Запустите бота из папки `bot`:
 
 ```bash

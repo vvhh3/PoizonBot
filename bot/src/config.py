@@ -7,7 +7,10 @@ class Settings(BaseSettings):
     # Локально pydantic-settings дополнительно читает файл .env.
     bot_token: str = Field(alias="BOT_TOKEN")
     admin_chat_id: int = Field(alias="ADMIN_CHAT_ID")
-    database_url: str = Field(alias="DATABASE_URL")
+    database_url: str = Field(
+        default="postgresql://postgres:postgres@localhost:5432/poizon_bot",
+        alias="DATABASE_URL",
+    )
     admin_username: str = Field(default="admin_username", alias="ADMIN_USERNAME")
 
     model_config = SettingsConfigDict(
@@ -18,6 +21,9 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_database_url(self) -> str:
+        if not self.database_url.strip():
+            return "postgresql+asyncpg://postgres:postgres@localhost:5432/poizon_bot"
+
         # Railway и некоторые хостинги часто выдают DATABASE_URL в формате
         # postgresql:// или postgres://. Для SQLAlchemy async нужен драйвер
         # postgresql+asyncpg://, поэтому нормализуем URL в одном месте.
