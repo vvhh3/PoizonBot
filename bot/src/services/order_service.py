@@ -1,4 +1,11 @@
-from datetime import datetime, timezone
+"""Бизнес-логика заявок.
+
+Handlers отвечают только за Telegram-события, repository отвечает за SQL,
+а этот сервис хранит правила предметной области: обязательные поля,
+статусы, формат сообщений, одобрение, отклонение и оплату.
+"""
+
+from datetime import UTC, datetime, timedelta
 from html import escape
 
 from aiogram.types import User
@@ -87,7 +94,7 @@ class OrderService:
             status=OrderStatus.WAITING_PAYMENT.value,
             processed_by_id=admin.id,
             processed_by_username=admin.username,
-            processed_at=datetime.now(timezone.utc),
+            processed_at=datetime.now(UTC),
         )
 
     async def reject_by_admin(self, order_id: int, reason: str, admin: User) -> Order:
@@ -98,7 +105,7 @@ class OrderService:
             status=OrderStatus.REJECTED.value,
             processed_by_id=admin.id,
             processed_by_username=admin.username,
-            processed_at=datetime.now(timezone.utc),
+            processed_at=datetime.now(UTC),
         )
 
     async def cancel_after_approval(
@@ -206,7 +213,7 @@ class OrderService:
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'загружено' if order.photo_file_id else 'не загружено'}\n"
             f"Комментарий: {self._value(order.comment)}\n"
-            f"Цена: {order.admin_price} ₽\n"
+            f"<b>Цена: {order.admin_price} ₽</b>\n"
             f"Комментарий администратора: {self._value(order.admin_comment)}"
         )
 
@@ -289,4 +296,10 @@ class OrderService:
     def _processed_at(self, order: Order) -> str:
         if not order.processed_at:
             return "ещё не обработана"
-        return order.processed_at.strftime("%d.%m.%Y %H:%M")
+        # В базе время хранится в UTC. В интерфейсе нужно UTC+4:
+        # это на один час больше Москвы и удобно для Самарского часового пояса.
+        processed_at = order.processed_at
+        if processed_at.tzinfo is None:
+            processed_at = processed_at.replace(tzinfo=UTC)
+        processed_at_utc4 = processed_at.astimezone(UTC) + timedelta(hours=4)
+        return processed_at_utc4.strftime("%d.%m.%Y %H:%M")

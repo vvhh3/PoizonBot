@@ -1,3 +1,9 @@
+"""Repository для заявок.
+
+Здесь находятся низкоуровневые операции с PostgreSQL: создание заявки,
+получение по ID, списки пользователя, статистика и update полей.
+"""
+
 from typing import Any
 
 from sqlalchemy import func, select

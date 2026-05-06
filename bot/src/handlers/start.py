@@ -1,3 +1,9 @@
+"""Стартовые handlers.
+
+Здесь обрабатывается `/start` и кнопка связи с админом. Основной функционал
+заявок находится в `user_orders.py` и `admin_orders.py`.
+"""
+
 from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Message

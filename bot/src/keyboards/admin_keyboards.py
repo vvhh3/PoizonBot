@@ -1,3 +1,9 @@
+"""Inline-клавиатуры для администраторов.
+
+Здесь находятся кнопки одобрения/отклонения заявки, отмены действия
+и готовые причины отказа.
+"""
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 

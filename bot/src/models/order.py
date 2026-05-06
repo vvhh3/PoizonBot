@@ -1,3 +1,9 @@
+"""Модель заявки и enum статусов.
+
+Таблица `orders` хранит только реальные заявки, которые уже отправлены
+администраторам или были обработаны. Временный черновик до отправки живёт в FSM.
+"""
+
 from datetime import datetime
 from enum import StrEnum
 from typing import Optional

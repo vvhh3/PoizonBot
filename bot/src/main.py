@@ -1,3 +1,9 @@
+"""Точка входа приложения.
+
+Файл поднимает таблицы, регистрирует команды Telegram, подключает роутеры
+и запускает aiogram polling без webhook.
+"""
+
 import asyncio
 import logging
 

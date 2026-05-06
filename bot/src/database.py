@@ -1,7 +1,13 @@
+"""Подключение к PostgreSQL.
+
+Здесь создаётся async SQLAlchemy engine, фабрика сессий и простая инициализация
+таблиц. Все обращения к базе в проекте идут через async-сессии.
+"""
+
 from collections.abc import AsyncIterator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config import settings
 from src.models.order import Base

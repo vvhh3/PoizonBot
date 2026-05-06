@@ -1,3 +1,9 @@
+"""Админские handlers заявок.
+
+Файл отвечает за `/stats`, одобрение заявки, ввод цены, отклонение по готовой
+причине, отмену админского действия и защиту админских команд.
+"""
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command

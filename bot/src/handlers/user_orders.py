@@ -1,3 +1,9 @@
+"""Пользовательские handlers заявок.
+
+Файл отвечает за оформление заявки, FSM-заполнение полей, просмотр своих заявок,
+переход к оплате и отказ пользователя после одобрения.
+"""
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command

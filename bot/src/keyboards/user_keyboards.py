@@ -1,3 +1,9 @@
+"""Inline-клавиатуры для пользовательских сценариев.
+
+Клавиатуры вынесены отдельно, чтобы handlers занимались только событиями,
+а структура кнопок была собрана в одном месте.
+"""
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.config import settings

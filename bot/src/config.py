@@ -1,3 +1,9 @@
+"""Настройки проекта.
+
+Этот модуль читает переменные окружения из `.env` локально и из окружения
+Railway в production. Остальной код импортирует готовый объект `settings`.
+"""
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
