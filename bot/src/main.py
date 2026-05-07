@@ -38,7 +38,7 @@ async def main() -> None:
             "Не удалось подключиться к PostgreSQL. "
             "Проверь DATABASE_URL или запусти локальную БД командой: docker compose up -d db"
         )
-        logger.debug("Database connection error", exc_info=True)
+        logger.debug("Ошибка подключения к базе данных", exc_info=True)
         return
 
     await setup_bot_commands()
@@ -55,7 +55,7 @@ async def main() -> None:
     # но пишет traceback в логи и не оставляет исключения совсем без контекста.
     @dp.errors()
     async def errors_handler(event: ErrorEvent) -> bool:
-        logger.exception("Unhandled update error", exc_info=event.exception)
+        logger.exception("Необработанная ошибка при обработке Telegram update", exc_info=event.exception)
         return True
 
     try:

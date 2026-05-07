@@ -24,6 +24,50 @@ def admin_order_keyboard(order_id: int, user_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def admin_paid_order_keyboard(order_id: int, user_id: int) -> InlineKeyboardMarkup:
+    # Эта клавиатура появляется у админов после оплаты заявки.
+    # В отличие от первичной карточки тут уже нельзя одобрять/отклонять:
+    # деньги условно получены, дальше админ ведет заказ по статусам доставки.
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Изменить статус", callback_data=f"admin:status:menu:{order_id}")],
+            [
+                InlineKeyboardButton(
+                    text="Связаться с пользователем",
+                    url=f"tg://user?id={user_id}",
+                )
+            ],
+        ]
+    )
+
+
+def admin_order_status_keyboard(order_id: int, user_id: int) -> InlineKeyboardMarkup:
+    # Меню статусов показывается после нажатия "Изменить статус".
+    # callback_data содержит order_id и новый статус, чтобы handler мог
+    # сохранить выбранный статус и уведомить владельца заявки.
+    statuses = [
+        ("В пути", "in_transit"),
+        ("Пришла", "arrived"),
+        ("Задерживается", "delayed"),
+        ("Отменена", "cancelled"),
+        ("Отдана человеку", "handed_over"),
+    ]
+
+    rows = [
+        [InlineKeyboardButton(text=text, callback_data=f"admin:status:set:{order_id}:{status}")]
+        for text, status in statuses
+    ]
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="Связаться с пользователем",
+                url=f"tg://user?id={user_id}",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_cancel_action_keyboard(order_id: int) -> InlineKeyboardMarkup:
     # Общая клавиатура отмены используется на шагах ввода цены и комментария.
     # order_id кладем в callback_data, чтобы можно было вернуть кнопки именно

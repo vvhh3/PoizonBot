@@ -104,11 +104,20 @@ def payment_keyboard(order_id: int, payment_url: str | None) -> InlineKeyboardMa
         else InlineKeyboardButton(text="Тестовая оплата", callback_data=f"payment:dev_success:{order_id}")
     )
 
+    rows = [
+        [payment_button],
+        [InlineKeyboardButton(text="Связаться с админом", callback_data="contact:admin")],
+        [InlineKeyboardButton(text="Назад", callback_data="payment:back")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def contact_admin_keyboard() -> InlineKeyboardMarkup:
+    # Универсальная кнопка связи с менеджером для системных уведомлений:
+    # например когда админ поменял статус уже оплаченной заявки.
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [payment_button],
             [InlineKeyboardButton(text="Связаться с админом", callback_data="contact:admin")],
-            [InlineKeyboardButton(text="Назад", callback_data="payment:back")],
         ]
     )
 

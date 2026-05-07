@@ -20,6 +20,15 @@ from src.services.payment_service import PaymentService
 
 logger = logging.getLogger(__name__)
 
+ADMIN_MANAGED_STATUSES = {
+    OrderStatus.PAID.value,
+    OrderStatus.IN_TRANSIT.value,
+    OrderStatus.ARRIVED.value,
+    OrderStatus.DELAYED.value,
+    OrderStatus.CANCELLED.value,
+    OrderStatus.HANDED_OVER.value,
+}
+
 
 class OrderService:
     # Сервис содержит бизнес-правила заявок.
@@ -99,7 +108,7 @@ class OrderService:
         order = await self._get_admin_order(order_id)
         payment_url = self.payment_service.build_payment_url(order)
         logger.info(
-            "Admin approves order",
+            "Админ одобряет заявку",
             extra={
                 "order_id": order_id,
                 "admin_id": admin.id,
@@ -121,7 +130,7 @@ class OrderService:
     async def reject_by_admin(self, order_id: int, reason: str, admin: User) -> Order:
         order = await self._get_admin_order(order_id)
         logger.info(
-            "Admin rejects order",
+            "Админ отклоняет заявку",
             extra={
                 "order_id": order_id,
                 "admin_id": admin.id,
@@ -178,10 +187,39 @@ class OrderService:
             raise ValueError("Эту заявку нельзя оплатить.")
 
         logger.info(
-            "Order marked as paid by dev payment stub",
+            "Заявка отмечена оплаченной через dev-заглушку",
             extra={"order_id": order_id, "user_id": user_id},
         )
         return await self.repository.update(order, status=OrderStatus.PAID.value)
+
+    async def set_admin_managed_status(
+        self,
+        order_id: int,
+        status: str,
+        admin: User,
+    ) -> Order:
+        # После оплаты заявка переходит в сопровождение админом.
+        # Админ может менять только логистические статусы, а черновики,
+        # отклоненные и неоплаченные заявки этот метод не трогает.
+        if status not in ADMIN_MANAGED_STATUSES:
+            raise ValueError("Некорректный статус заявки.")
+
+        order = await self.repository.get_by_id(order_id)
+        if not order:
+            raise ValueError("Заявка не найдена.")
+        if order.status not in ADMIN_MANAGED_STATUSES:
+            raise ValueError("Статус можно менять только у оплаченной заявки.")
+
+        logger.info(
+            "Админ изменил статус оплаченной заявки",
+            extra={
+                "order_id": order_id,
+                "admin_id": admin.id,
+                "old_status": order.status,
+                "new_status": status,
+            },
+        )
+        return await self.repository.update(order, status=status)
 
     def get_missing_required_fields(self, order: Order) -> list[str]:
         # Обязательные поля: address, product_type, size и хотя бы одно
@@ -236,8 +274,9 @@ class OrderService:
 
     def format_admin_order(self, order: Order) -> str:
         username = f"@{order.username}" if order.username else "не указан"
+        title = "Оплаченная заявка" if order.status in ADMIN_MANAGED_STATUSES else "Новая заявка"
         return (
-            f"<b>Новая заявка #{order.id}</b>\n\n"
+            f"<b>{title} #{order.id}</b>\n\n"
             f"Telegram ID пользователя: <code>{order.user_id}</code>\n"
             f"Username пользователя: {escape(username)}\n"
             f"Адрес: {self._value(order.address)}\n"
@@ -295,6 +334,15 @@ class OrderService:
             )
         return "\n".join(lines)
 
+    def format_user_status_changed(self, order: Order) -> str:
+        # Короткое уведомление пользователю после изменения статуса админом.
+        # Полную карточку заявки пользователь может посмотреть через "Мои заявки",
+        # а здесь важно быстро показать новый статус и дать кнопку связи.
+        return (
+            f"Статус у заявки <code>{order.id}</code> изменён.\n\n"
+            f"Новый статус: <b>{self._status_title(order.status)}</b>"
+        )
+
     def format_stats(self, stats: dict[str, int]) -> str:
         total = sum(stats.values())
         lines = [f"<b>Статистика заявок</b>", f"Всего: {total}"]
@@ -338,6 +386,10 @@ class OrderService:
             OrderStatus.REJECTED.value: "отклонена",
             OrderStatus.WAITING_PAYMENT.value: "ожидает оплату",
             OrderStatus.PAID.value: "оплачена",
+            OrderStatus.IN_TRANSIT.value: "в пути",
+            OrderStatus.ARRIVED.value: "пришла",
+            OrderStatus.DELAYED.value: "задерживается",
+            OrderStatus.HANDED_OVER.value: "отдана человеку",
             OrderStatus.CANCELLED.value: "отменена",
         }
         return titles.get(status, status)

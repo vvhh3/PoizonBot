@@ -19,9 +19,11 @@ from src.keyboards.admin_keyboards import (
     admin_approve_comment_keyboard,
     admin_cancel_action_keyboard,
     admin_order_keyboard,
+    admin_order_status_keyboard,
+    admin_paid_order_keyboard,
     admin_reject_reasons_keyboard,
 )
-from src.keyboards.user_keyboards import approved_order_keyboard
+from src.keyboards.user_keyboards import approved_order_keyboard, contact_admin_keyboard
 from src.services.order_service import OrderService
 from src.states.order_states import AdminOrderForm
 
@@ -76,7 +78,7 @@ async def approve_order(callback: CallbackQuery, state: FSMContext) -> None:
         await _remove_admin_order_buttons(callback.message)
     await state.set_state(AdminOrderForm.price)
     logger.info(
-        "Admin started approval flow",
+        "Админ начал одобрение заявки",
         extra={"order_id": order_id, "admin_id": callback.from_user.id if callback.from_user else None},
     )
 
@@ -115,7 +117,7 @@ async def save_admin_price(message: Message, state: FSMContext) -> None:
     await state.update_data(pending_admin_price=int(raw_price))
     await state.set_state(AdminOrderForm.approve_comment)
     logger.info(
-        "Admin entered approval price",
+        "Админ ввёл цену для одобрения заявки",
         extra={
             "order_id": order_id,
             "admin_id": message.from_user.id if message.from_user else None,
@@ -202,7 +204,7 @@ async def reject_order(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await state.update_data(action_message_id=action_message.message_id)
     logger.info(
-        "Admin started rejection flow",
+        "Админ начал отклонение заявки",
         extra={"order_id": order_id, "admin_id": callback.from_user.id if callback.from_user else None},
     )
     await callback.answer()
@@ -252,7 +254,7 @@ async def reject_order_by_reason(callback: CallbackQuery, state: FSMContext) -> 
     if callback.message:
         await _delete_message(callback.message)
     logger.info(
-        "Admin rejected order by prepared reason",
+        "Админ отклонил заявку готовой причиной",
         extra={"order_id": order.id, "admin_id": callback.from_user.id if callback.from_user else None},
     )
     await callback.answer("Заявка отклонена.")
@@ -271,6 +273,93 @@ async def cancel_admin_action(callback: CallbackQuery, state: FSMContext) -> Non
         return
 
     await _cancel_admin_action(callback, state, order_id)
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("admin:status:menu:"))
+async def show_order_status_menu(callback: CallbackQuery) -> None:
+    # После оплаты админы ведут заявку по логистическим статусам.
+    # Эта кнопка не меняет данные, а только заменяет клавиатуру карточки
+    # на список доступных статусов.
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+
+    order_id = _parse_order_id(callback.data or "")
+    if order_id is None:
+        await callback.answer("Некорректная заявка.", show_alert=True)
+        return
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        order = await service.get_order(order_id)
+        if not order:
+            await callback.answer("Заявка не найдена.", show_alert=True)
+            return
+
+    if callback.message:
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+                reply_markup=admin_order_status_keyboard(order.id, order.user_id),
+            )
+        except TelegramBadRequest:
+            await callback.answer("Не удалось открыть меню статусов.", show_alert=True)
+            return
+
+    await callback.answer()
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("admin:status:set:"))
+async def set_order_status(callback: CallbackQuery) -> None:
+    # Handler сохраняет выбранный админом статус доставки.
+    # После успешного сохранения:
+    # 1. админская карточка обновляется новым статусом;
+    # 2. клавиатура снова становится компактной с кнопкой "Изменить статус";
+    # 3. пользователь получает уведомление и кнопку связи с админом.
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+
+    parsed = _parse_status_callback(callback.data or "")
+    if not parsed:
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    order_id, new_status = parsed
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        try:
+            order = await service.set_admin_managed_status(order_id, new_status, callback.from_user)
+        except ValueError as error:
+            await callback.answer(str(error), show_alert=True)
+            return
+
+        admin_text = service.format_admin_order(order)
+        user_text = service.format_user_status_changed(order)
+
+    if callback.message:
+        await _edit_admin_message(
+            callback.message,
+            admin_text,
+            admin_paid_order_keyboard(order.id, order.user_id),
+        )
+
+    await bot.send_message(
+        chat_id=order.user_id,
+        text=user_text,
+        reply_markup=contact_admin_keyboard(),
+    )
+    logger.info(
+        "Админ уведомил пользователя о новом статусе заявки",
+        extra={
+            "order_id": order.id,
+            "admin_id": callback.from_user.id if callback.from_user else None,
+            "new_status": order.status,
+        },
+    )
+    await callback.answer("Статус заявки изменён.")
 
 
 @router.message(AdminOrderForm.reject_reason, F.chat.id == settings.admin_chat_id)
@@ -305,7 +394,7 @@ async def save_reject_reason(message: Message, state: FSMContext) -> None:
     await _edit_admin_order_card(state, admin_text)
     await _delete_action_message(message, state)
     logger.info(
-        "Admin rejected order by custom reason",
+        "Админ отклонил заявку своей причиной",
         extra={"order_id": order.id, "admin_id": message.from_user.id if message.from_user else None},
     )
     await message.answer(f"Заявка #{order.id} отклонена, причина отправлена пользователю.")
@@ -352,7 +441,7 @@ async def _finish_approval(
     await _edit_admin_order_card(state, admin_text)
     await _delete_action_message(message, state)
     logger.info(
-        "Admin finished approval flow",
+        "Админ завершил одобрение заявки",
         extra={
             "order_id": order.id,
             "admin_id": admin.id,
@@ -392,6 +481,13 @@ def _parse_order_id(callback_data: str) -> int | None:
     return int(raw_order_id)
 
 
+def _parse_status_callback(callback_data: str) -> tuple[int, str] | None:
+    parts = callback_data.split(":")
+    if len(parts) != 5 or not parts[3].isdigit():
+        return None
+    return int(parts[3]), parts[4]
+
+
 async def _edit_admin_order_card(state: FSMContext, text: str) -> None:
     data = await state.get_data()
     chat_id = data.get("admin_message_chat_id")
@@ -415,6 +511,33 @@ async def _edit_admin_order_card(state: FSMContext, text: str) -> None:
                 message_id=int(message_id),
                 text=text,
                 reply_markup=None,
+            )
+    except TelegramBadRequest:
+        return
+
+
+async def _edit_admin_message(
+    message: Message,
+    text: str,
+    reply_markup,
+) -> None:
+    # Один helper для редактирования админской карточки и с фото, и без фото.
+    # Telegram различает текстовые сообщения и подписи к фото, поэтому приходится
+    # выбирать edit_message_caption или edit_message_text по факту наличия photo.
+    try:
+        if message.photo:
+            await bot.edit_message_caption(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                caption=text,
+                reply_markup=reply_markup,
+            )
+        else:
+            await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                text=text,
+                reply_markup=reply_markup,
             )
     except TelegramBadRequest:
         return

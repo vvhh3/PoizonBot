@@ -15,7 +15,7 @@ from aiogram.types import CallbackQuery, Message
 from src.bot.loader import bot
 from src.config import settings
 from src.database import SessionLocal
-from src.keyboards.admin_keyboards import admin_order_keyboard
+from src.keyboards.admin_keyboards import admin_order_keyboard, admin_paid_order_keyboard
 from src.keyboards.user_keyboards import (
     approved_order_keyboard,
     draft_order_menu_keyboard,
@@ -71,7 +71,7 @@ async def create_order(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.update_data(draft=draft)
     logger.info(
-        "User started order draft",
+        "Пользователь начал оформление черновика заявки",
         extra={"user_id": callback.from_user.id},
     )
 
@@ -273,7 +273,7 @@ async def submit_order(callback: CallbackQuery) -> None:
 
         if missing_fields:
             logger.info(
-                "User tried to submit incomplete order",
+                "Пользователь попытался отправить незаполненную заявку",
                 extra={
                     "order_id": order.id,
                     "user_id": callback.from_user.id,
@@ -306,7 +306,7 @@ async def submit_order(callback: CallbackQuery) -> None:
     await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
     await callback.message.answer("Заявка отправлена администраторам.")
     logger.info(
-        "User submitted existing draft order",
+        "Пользователь отправил сохранённый черновик заявки",
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
@@ -329,7 +329,7 @@ async def submit_draft_order(callback: CallbackQuery, state: FSMContext) -> None
         missing_fields = service.get_missing_required_draft_fields(draft)
         if missing_fields:
             logger.info(
-                "User tried to submit incomplete FSM draft",
+                "Пользователь попытался отправить незаполненный FSM-черновик",
                 extra={
                     "user_id": callback.from_user.id,
                     "missing_fields": ",".join(missing_fields),
@@ -363,7 +363,7 @@ async def submit_draft_order(callback: CallbackQuery, state: FSMContext) -> None
     await callback.message.answer("Заявка отправлена администраторам.")
     await state.clear()
     logger.info(
-        "User submitted FSM draft order",
+        "Пользователь отправил FSM-черновик заявки",
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
@@ -376,7 +376,7 @@ async def cancel_unsent_draft(callback: CallbackQuery, state: FSMContext) -> Non
     await state.clear()
     if callback.from_user:
         logger.info(
-            "User cancelled unsent FSM draft",
+            "Пользователь отменил неотправленный FSM-черновик",
             extra={"user_id": callback.from_user.id},
         )
     await callback.answer()
@@ -406,7 +406,7 @@ async def cancel_draft(callback: CallbackQuery) -> None:
             service = OrderService(session)
             await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
     logger.info(
-        "User cancelled draft order",
+        "Пользователь отменил черновик заявки",
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
@@ -444,7 +444,7 @@ async def user_reject_approved_order(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.edit_text(user_text, reply_markup=None)
     logger.info(
-        "User rejected approved order",
+        "Пользователь отказался от одобренной заявки",
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
@@ -482,7 +482,7 @@ async def pay_order(callback: CallbackQuery, state: FSMContext) -> None:
         payment_order_message_id=callback.message.message_id,
     )
     logger.info(
-        "User opened payment",
+        "Пользователь открыл оплату заявки",
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
@@ -522,12 +522,9 @@ async def dev_payment_success(callback: CallbackQuery, state: FSMContext) -> Non
         )
         await callback.message.answer(user_text)
 
-    await bot.send_message(
-        chat_id=settings.admin_chat_id,
-        text=f"Заявка #{order.id} отмечена как оплаченная через dev-заглушку.",
-    )
+    await _send_paid_order_to_admins(order)
     logger.info(
-        "User completed dev payment stub",
+        "Пользователь завершил оплату через dev-заглушку",
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await state.clear()
@@ -704,6 +701,38 @@ async def _edit_source_draft_menu(
             service.format_draft_menu(draft),
             reply_markup=draft_order_menu_keyboard(),
         )
+
+
+async def _send_paid_order_to_admins(order) -> None:
+    # Единая отправка оплаченной заявки админам.
+    #
+    # Сейчас helper вызывает dev-заглушка оплаты.
+    #
+    # Когда появится официальный платежный webhook, из него нужно будет вызвать
+    # такую же отправку после подтверждения payment.succeeded.
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        fresh_order = await service.get_order(order.id)
+        if not fresh_order:
+            return
+
+        admin_text = service.format_admin_order(fresh_order)
+        admin_keyboard = admin_paid_order_keyboard(fresh_order.id, fresh_order.user_id)
+
+    if fresh_order.photo_file_id:
+        await bot.send_photo(
+            chat_id=settings.admin_chat_id,
+            photo=fresh_order.photo_file_id,
+            caption=admin_text,
+            reply_markup=admin_keyboard,
+        )
+    else:
+        await bot.send_message(
+            chat_id=settings.admin_chat_id,
+            text=admin_text,
+            reply_markup=admin_keyboard,
+        )
+
 
 async def _cleanup_field_messages(message: Message, state: FSMContext) -> None:
     data = await state.get_data()

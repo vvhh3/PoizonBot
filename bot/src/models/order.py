@@ -23,6 +23,10 @@ class OrderStatus(StrEnum):
     REJECTED = "rejected"
     WAITING_PAYMENT = "waiting_payment"
     PAID = "paid"
+    IN_TRANSIT = "in_transit"
+    ARRIVED = "arrived"
+    DELAYED = "delayed"
+    HANDED_OVER = "handed_over"
     CANCELLED = "cancelled"
 
 
