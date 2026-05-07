@@ -4,6 +4,8 @@
 переход к оплате и отказ пользователя после одобрения.
 """
 
+import logging
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
@@ -26,6 +28,7 @@ from src.states.order_states import OrderForm
 
 
 router = Router(name="user_orders")
+logger = logging.getLogger(__name__)
 
 # Текстовые подсказки для каждого поля заявки.
 # Ключи совпадают с именами полей в модели/сервисе и используются в callback_data.
@@ -67,6 +70,10 @@ async def create_order(callback: CallbackQuery, state: FSMContext) -> None:
     }
     await state.clear()
     await state.update_data(draft=draft)
+    logger.info(
+        "User started order draft",
+        extra={"user_id": callback.from_user.id},
+    )
 
     async with SessionLocal() as session:
         service = OrderService(session)
@@ -265,6 +272,14 @@ async def submit_order(callback: CallbackQuery) -> None:
             return
 
         if missing_fields:
+            logger.info(
+                "User tried to submit incomplete order",
+                extra={
+                    "order_id": order.id,
+                    "user_id": callback.from_user.id,
+                    "missing_fields": ",".join(missing_fields),
+                },
+            )
             await callback.answer(
                 "Заполните обязательные поля: " + ", ".join(missing_fields),
                 show_alert=True,
@@ -290,6 +305,10 @@ async def submit_order(callback: CallbackQuery) -> None:
 
     await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
     await callback.message.answer("Заявка отправлена администраторам.")
+    logger.info(
+        "User submitted existing draft order",
+        extra={"order_id": order.id, "user_id": callback.from_user.id},
+    )
     await callback.answer()
 
 
@@ -309,6 +328,13 @@ async def submit_draft_order(callback: CallbackQuery, state: FSMContext) -> None
         service = OrderService(session)
         missing_fields = service.get_missing_required_draft_fields(draft)
         if missing_fields:
+            logger.info(
+                "User tried to submit incomplete FSM draft",
+                extra={
+                    "user_id": callback.from_user.id,
+                    "missing_fields": ",".join(missing_fields),
+                },
+            )
             await callback.answer(
                 "Заполните обязательные поля: " + ", ".join(missing_fields),
                 show_alert=True,
@@ -336,6 +362,10 @@ async def submit_draft_order(callback: CallbackQuery, state: FSMContext) -> None
     await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
     await callback.message.answer("Заявка отправлена администраторам.")
     await state.clear()
+    logger.info(
+        "User submitted FSM draft order",
+        extra={"order_id": order.id, "user_id": callback.from_user.id},
+    )
     await callback.answer()
 
 
@@ -344,6 +374,11 @@ async def cancel_unsent_draft(callback: CallbackQuery, state: FSMContext) -> Non
     if callback.message:
         await callback.message.edit_text("Заявка отменена.")
     await state.clear()
+    if callback.from_user:
+        logger.info(
+            "User cancelled unsent FSM draft",
+            extra={"user_id": callback.from_user.id},
+        )
     await callback.answer()
 
 
@@ -370,6 +405,10 @@ async def cancel_draft(callback: CallbackQuery) -> None:
         async with SessionLocal() as session:
             service = OrderService(session)
             await callback.message.edit_text(service.format_order_menu(order), reply_markup=None)
+    logger.info(
+        "User cancelled draft order",
+        extra={"order_id": order.id, "user_id": callback.from_user.id},
+    )
     await callback.answer()
 
 
@@ -404,6 +443,10 @@ async def user_reject_approved_order(callback: CallbackQuery) -> None:
 
     if callback.message:
         await callback.message.edit_text(user_text, reply_markup=None)
+    logger.info(
+        "User rejected approved order",
+        extra={"order_id": order.id, "user_id": callback.from_user.id},
+    )
     await callback.answer()
 
 
@@ -437,6 +480,10 @@ async def pay_order(callback: CallbackQuery, state: FSMContext) -> None:
         payment_order_id=order.id,
         payment_order_chat_id=callback.message.chat.id,
         payment_order_message_id=callback.message.message_id,
+    )
+    logger.info(
+        "User opened payment",
+        extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
 

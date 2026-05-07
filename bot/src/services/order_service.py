@@ -5,6 +5,7 @@ Handlers отвечают только за Telegram-события, repository 
 статусы, формат сообщений, одобрение, отклонение и оплату.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
 from html import escape
 
@@ -14,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.order import Order, OrderStatus
 from src.repositories.order_repository import OrderRepository
 from src.services.payment_service import PaymentService
+
+
+logger = logging.getLogger(__name__)
 
 
 class OrderService:
@@ -82,14 +86,30 @@ class OrderService:
         order = await self.repository.update(order, status=OrderStatus.SENT_TO_ADMIN.value)
         return order, []
 
-    async def set_admin_price(self, order_id: int, price: int, admin: User) -> Order:
+    async def set_admin_price(
+        self,
+        order_id: int,
+        price: int,
+        admin_comment: str | None,
+        admin: User,
+    ) -> Order:
         # Одобрение на первом этапе фактически переводит заявку сразу
         # в waiting_payment, потому что пользователь уже может перейти к оплате.
         order = await self._get_admin_order(order_id)
         payment_url = self.payment_service.build_payment_url(order)
+        logger.info(
+            "Admin approves order",
+            extra={
+                "order_id": order_id,
+                "admin_id": admin.id,
+                "price": price,
+                "has_admin_comment": bool(admin_comment),
+            },
+        )
         return await self.repository.update(
             order,
             admin_price=price,
+            admin_comment=admin_comment,
             payment_url=payment_url,
             status=OrderStatus.WAITING_PAYMENT.value,
             processed_by_id=admin.id,
@@ -99,6 +119,14 @@ class OrderService:
 
     async def reject_by_admin(self, order_id: int, reason: str, admin: User) -> Order:
         order = await self._get_admin_order(order_id)
+        logger.info(
+            "Admin rejects order",
+            extra={
+                "order_id": order_id,
+                "admin_id": admin.id,
+                "reason_length": len(reason),
+            },
+        )
         return await self.repository.update(
             order,
             admin_comment=reason,
@@ -195,9 +223,10 @@ class OrderService:
             f"Размер: {self._value(order.size)}\n"
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'есть' if order.photo_file_id else 'нет'}\n"
-            f"Комментарий: {self._value(order.comment)}\n"
-            f"Причина решения: {self._value(order.admin_comment)}\n"
+            f"Комментарий пользователя: {self._value(order.comment)}\n"
+            f"Комментарий администратора: {self._value(order.admin_comment)}\n"
             f"Статус: {self._status_title(order.status)}\n"
+            f"Цена: {self._price_value(order.admin_price)}\n"
             f"Решение принял: {self._processed_by(order)}\n"
             f"Когда обработана: {self._processed_at(order)}"
         )
@@ -213,7 +242,7 @@ class OrderService:
             f"Ссылка: {self._value(order.link)}\n"
             f"Фото: {'загружено' if order.photo_file_id else 'не загружено'}\n"
             f"Комментарий: {self._value(order.comment)}\n"
-            f"<b>Цена: {order.admin_price} ₽</b>\n"
+            f"<b>Цена: {self._price_value(order.admin_price)}</b>\n"
             f"Комментарий администратора: {self._value(order.admin_comment)}"
         )
 
@@ -273,6 +302,11 @@ class OrderService:
         if value is None or value == "":
             return "не указан"
         return escape(str(value))
+
+    def _price_value(self, price: int | None) -> str:
+        if price is None:
+            return "не указана"
+        return f"{price} ₽"
 
     def _status_title(self, status: str) -> str:
         titles = {

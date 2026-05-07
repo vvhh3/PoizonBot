@@ -4,16 +4,19 @@
 причине, отмену админского действия и защиту админских команд.
 """
 
+import logging
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
 
 from src.bot.loader import bot
 from src.config import settings
 from src.database import SessionLocal
 from src.keyboards.admin_keyboards import (
+    admin_approve_comment_keyboard,
     admin_cancel_action_keyboard,
     admin_order_keyboard,
     admin_reject_reasons_keyboard,
@@ -24,6 +27,7 @@ from src.states.order_states import AdminOrderForm
 
 
 router = Router(name="admin_orders")
+logger = logging.getLogger(__name__)
 
 REJECT_REASONS = {
     "rules": "Не прошёл правила",
@@ -33,6 +37,7 @@ REJECT_REASONS = {
     "no_reason": "Без причины",
     "offtopic": "Не по теме",
     "bad_data": "Некорректные данные",
+    "no_item": "Не нашли товар",
 }
 
 
@@ -70,6 +75,10 @@ async def approve_order(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await _remove_admin_order_buttons(callback.message)
     await state.set_state(AdminOrderForm.price)
+    logger.info(
+        "Admin started approval flow",
+        extra={"order_id": order_id, "admin_id": callback.from_user.id if callback.from_user else None},
+    )
 
     if callback.message:
         action_message = await callback.message.answer(
@@ -99,29 +108,70 @@ async def save_admin_price(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     order_id = int(data["order_id"])
 
-    # Цена сохраняется в PostgreSQL, заявка переводится в waiting_payment,
-    # а пользователю отправляется форма с кнопками оплаты/отказа/связи.
-    async with SessionLocal() as session:
-        service = OrderService(session)
-        try:
-            order = await service.set_admin_price(order_id, int(raw_price), message.from_user)
-        except ValueError as error:
-            await message.answer(str(error))
-            await state.clear()
-            return
-
-        user_text = service.format_user_approval(order)
-        admin_text = service.format_admin_order(order)
-
-    await bot.send_message(
-        chat_id=order.user_id,
-        text=user_text,
-        reply_markup=approved_order_keyboard(order.id),
+    # На этом шаге цену еще не сохраняем в БД окончательно: админ должен
+    # следующим сообщением добавить комментарий или нажать "Без комментария".
+    # Цена временно хранится в FSMContext, чтобы весь процесс одобрения
+    # завершился одним согласованным update в сервисе.
+    await state.update_data(pending_admin_price=int(raw_price))
+    await state.set_state(AdminOrderForm.approve_comment)
+    logger.info(
+        "Admin entered approval price",
+        extra={
+            "order_id": order_id,
+            "admin_id": message.from_user.id if message.from_user else None,
+            "price": int(raw_price),
+        },
     )
-    await _edit_admin_order_card(state, admin_text)
+
     await _delete_action_message(message, state)
-    await message.answer(f"Заявка #{order.id} одобрена, цена отправлена пользователю.")
-    await state.clear()
+    action_message = await message.answer(
+        f"Введите комментарий администратора для заявки #{order_id}.\n"
+        "Он будет показан пользователю в поле «Комментарий администратора».",
+        reply_markup=admin_approve_comment_keyboard(order_id),
+    )
+    await state.update_data(action_message_id=action_message.message_id)
+
+
+@router.message(AdminOrderForm.approve_comment, F.chat.id == settings.admin_chat_id)
+async def save_approve_comment(message: Message, state: FSMContext) -> None:
+    # Этот handler принимает свободный комментарий к одобрению.
+    # В отличие от причины отказа, комментарий не меняет смысл решения:
+    # заявка всё равно становится waiting_payment, а текст просто поясняет цену
+    # или условия заказа для пользователя.
+    if not _is_admin_message(message):
+        await message.answer("Недостаточно прав.")
+        await state.clear()
+        return
+
+    if not message.text:
+        await message.answer("Введите комментарий текстом или нажмите «Без комментария».")
+        return
+
+    await _finish_approval(message, state, message.text.strip(), message.from_user)
+
+
+@router.callback_query(
+    lambda callback: callback.data and callback.data.startswith("admin:approve_comment_skip:")
+)
+async def skip_approve_comment(callback: CallbackQuery, state: FSMContext) -> None:
+    # Кнопка пропуска закрывает второй шаг одобрения без сохранения текста.
+    # Пользователь увидит "Комментарий администратора: не указан".
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+
+    order_id = _parse_order_id(callback.data or "")
+    data = await state.get_data()
+    if order_id is None or int(data.get("order_id", 0)) != order_id:
+        await callback.answer("Некорректная заявка.", show_alert=True)
+        return
+
+    if not callback.message:
+        await callback.answer("Не удалось завершить действие.", show_alert=True)
+        return
+
+    await _finish_approval(callback.message, state, None, callback.from_user)
+    await callback.answer("Заявка одобрена без комментария.")
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("admin:reject:"))
@@ -151,6 +201,10 @@ async def reject_order(callback: CallbackQuery, state: FSMContext) -> None:
             reply_markup=admin_reject_reasons_keyboard(order_id),
         )
         await state.update_data(action_message_id=action_message.message_id)
+    logger.info(
+        "Admin started rejection flow",
+        extra={"order_id": order_id, "admin_id": callback.from_user.id if callback.from_user else None},
+    )
     await callback.answer()
 
 
@@ -197,6 +251,10 @@ async def reject_order_by_reason(callback: CallbackQuery, state: FSMContext) -> 
     await _edit_admin_order_card(state, admin_text)
     if callback.message:
         await _delete_message(callback.message)
+    logger.info(
+        "Admin rejected order by prepared reason",
+        extra={"order_id": order.id, "admin_id": callback.from_user.id if callback.from_user else None},
+    )
     await callback.answer("Заявка отклонена.")
     await state.clear()
 
@@ -246,7 +304,63 @@ async def save_reject_reason(message: Message, state: FSMContext) -> None:
     await bot.send_message(chat_id=order.user_id, text=user_text)
     await _edit_admin_order_card(state, admin_text)
     await _delete_action_message(message, state)
+    logger.info(
+        "Admin rejected order by custom reason",
+        extra={"order_id": order.id, "admin_id": message.from_user.id if message.from_user else None},
+    )
     await message.answer(f"Заявка #{order.id} отклонена, причина отправлена пользователю.")
+    await state.clear()
+
+
+async def _finish_approval(
+    message: Message,
+    state: FSMContext,
+    admin_comment: str | None,
+    admin: User,
+) -> None:
+    # Финальная точка одобрения заявки.
+    #
+    # Здесь сходятся оба варианта второго шага:
+    # 1. админ написал комментарий текстом;
+    # 2. админ нажал "Без комментария".
+    #
+    # Только здесь сохраняем цену и комментарий в БД, переводим заявку
+    # в waiting_payment, обновляем админскую карточку и отправляем пользователю
+    # сообщение с кнопкой оплаты. Так админ не отправит пользователю неполную
+    # заявку, где цена уже есть, а комментарий еще не обработан.
+    data = await state.get_data()
+    order_id = int(data["order_id"])
+    price = int(data["pending_admin_price"])
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        try:
+            order = await service.set_admin_price(order_id, price, admin_comment, admin)
+        except ValueError as error:
+            await message.answer(str(error))
+            await state.clear()
+            return
+
+        user_text = service.format_user_approval(order)
+        admin_text = service.format_admin_order(order)
+
+    await bot.send_message(
+        chat_id=order.user_id,
+        text=user_text,
+        reply_markup=approved_order_keyboard(order.id),
+    )
+    await _edit_admin_order_card(state, admin_text)
+    await _delete_action_message(message, state)
+    logger.info(
+        "Admin finished approval flow",
+        extra={
+            "order_id": order.id,
+            "admin_id": admin.id,
+            "price": price,
+            "has_admin_comment": bool(admin_comment),
+        },
+    )
+    await message.answer(f"Заявка #{order.id} одобрена, цена и комментарий отправлены пользователю.")
     await state.clear()
 
 

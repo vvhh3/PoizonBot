@@ -250,3 +250,9 @@ https://yookassa.ru/developers/payment-acceptance/getting-started/quick-start
 https://yookassa.ru/developers/using-api/webhooks
 ЮKassa: чеки, 54-ФЗ и самозанятые: 
 https://yookassa.ru/developers/payment-acceptance/receipts/basics
+
+TODO: 
+
+- УБРАТЬ у пользователя в заявке: Комментарий администратора: не указан
+- После добавления цены админом, сделать что бы она отоброжалась у админов в заявке
+- Добавить логи 
