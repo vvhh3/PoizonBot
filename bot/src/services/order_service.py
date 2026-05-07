@@ -12,6 +12,7 @@ from html import escape
 from aiogram.types import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.models.order import Order, OrderStatus
 from src.repositories.order_repository import OrderRepository
 from src.services.payment_service import PaymentService
@@ -160,6 +161,27 @@ class OrderService:
             order,
             payment_url=self.payment_service.build_payment_url(order),
         )
+
+    async def mark_paid_by_dev_stub(self, order_id: int, user_id: int) -> Order:
+        # Dev-заглушка оплаты нужна только для локальной проверки сценария:
+        # пользователь нажимает кнопку, а бот сразу переводит заявку в paid.
+        #
+        # В production этот метод всегда падает с ошибкой, чтобы тестовый callback
+        # нельзя было использовать как замену реальному webhook от провайдера.
+        if not settings.is_dev:
+            raise ValueError("Тестовая оплата доступна только в dev-режиме.")
+
+        order = await self.repository.get_by_id(order_id)
+        if not order or order.user_id != user_id:
+            raise ValueError("Заявка не найдена.")
+        if order.status != OrderStatus.WAITING_PAYMENT.value:
+            raise ValueError("Эту заявку нельзя оплатить.")
+
+        logger.info(
+            "Order marked as paid by dev payment stub",
+            extra={"order_id": order_id, "user_id": user_id},
+        )
+        return await self.repository.update(order, status=OrderStatus.PAID.value)
 
     def get_missing_required_fields(self, order: Order) -> list[str]:
         # Обязательные поля: address, product_type, size и хотя бы одно

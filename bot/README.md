@@ -53,12 +53,15 @@ pip install -r requirements.txt
 Создайте `.env` по примеру `.env.example`:
 
 ```env
+APP_ENV=dev
 BOT_TOKEN=token_from_botfather
 ADMIN_CHAT_ID=-1001234567890
 ADMIN_IDS=123456789,987654321
 DATABASE_URL=postgresql://user:password@localhost:5432/poizon_bot
 ADMIN_USERNAME=admin_username
 ```
+
+`APP_ENV=dev` включает безопасные локальные заглушки, например тестовую оплату прямо в Telegram. Для Railway/боевого запуска ставьте `APP_ENV=production`.
 
 `ADMIN_CHAT_ID` — ID чата, куда бот отправляет заявки. `ADMIN_IDS` — Telegram ID админов через запятую. Админские команды и кнопки работают только в `ADMIN_CHAT_ID`, а если `ADMIN_IDS` заполнен, то ещё и только для этих пользователей.
 
@@ -90,6 +93,18 @@ python -m src.main
 
 Таблицы создаются автоматически при старте.
 
+## Логи
+
+Логи пишутся в консоль через стандартный Python `logging`.
+
+Локально вы видите их прямо в терминале, где запущена команда:
+
+```bash
+python -m src.main
+```
+
+На Railway откройте проект, выберите worker-процесс бота и перейдите во вкладку `Logs`. Там будут сообщения о запуске, ошибках, создании заявок, действиях админа и dev-оплате.
+
 ## Railway
 
 `Procfile` — это файл-инструкция для Railway/Heroku-подобных платформ. Он говорит платформе, какой процесс нужно поднять после деплоя.
@@ -105,6 +120,7 @@ worker: python -m src.main
 1. Создайте PostgreSQL service в Railway.
 2. Добавьте переменные окружения:
    - `BOT_TOKEN`
+   - `APP_ENV=production`
    - `ADMIN_CHAT_ID`
    - `ADMIN_IDS`
    - `DATABASE_URL`

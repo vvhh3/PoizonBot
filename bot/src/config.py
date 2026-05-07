@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Все значения берутся из переменных окружения.
     # Локально pydantic-settings дополнительно читает файл .env.
+    app_env: str = Field(default="dev", alias="APP_ENV")
     bot_token: str = Field(alias="BOT_TOKEN")
     admin_chat_id: int = Field(alias="ADMIN_CHAT_ID")
     database_url: str = Field(
@@ -50,6 +51,13 @@ class Settings(BaseSettings):
             if raw_id.lstrip("-").isdigit():
                 result.append(int(raw_id))
         return result
+
+    @property
+    def is_dev(self) -> bool:
+        # APP_ENV управляет опасными/боевыми интеграциями.
+        # dev/local/test включают безопасные заглушки, например тестовую оплату
+        # прямо внутри бота без перехода к платежному провайдеру.
+        return self.app_env.strip().lower() in {"dev", "development", "local", "test"}
 
 
 # Единственный объект настроек, который импортируется в остальных модулях.

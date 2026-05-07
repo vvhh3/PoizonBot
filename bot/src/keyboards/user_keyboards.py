@@ -93,10 +93,20 @@ def approved_order_keyboard(order_id: int, payment_url: str | None = None) -> In
     )
 
 
-def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
+def payment_keyboard(order_id: int, payment_url: str | None) -> InlineKeyboardMarkup:
+    # В dev-режиме payment_url пустой: вместо внешнего URL показываем кнопку,
+    # которая имитирует успешную оплату прямо в Telegram.
+    # В production, когда PaymentService вернет ссылку провайдера, кнопка будет
+    # обычной URL-кнопкой "Перейти к оплате".
+    payment_button = (
+        InlineKeyboardButton(text="Перейти к оплате", url=payment_url)
+        if payment_url
+        else InlineKeyboardButton(text="Тестовая оплата", callback_data=f"payment:dev_success:{order_id}")
+    )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти к оплате", url=payment_url)],
+            [payment_button],
             [InlineKeyboardButton(text="Связаться с админом", callback_data="contact:admin")],
             [InlineKeyboardButton(text="Назад", callback_data="payment:back")],
         ]

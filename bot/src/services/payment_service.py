@@ -5,12 +5,20 @@
 """
 
 from src.models.order import Order
+from src.config import settings
 
 
 class PaymentService:
-    def build_payment_url(self, order: Order) -> str:
-        # На первом этапе возвращаем стабильную тестовую ссылку.
-        # Когда подключится провайдер, здесь будет API-запрос на создание платежа.
+    def build_payment_url(self, order: Order) -> str | None:
+        # В dev-режиме не создаем даже тестовую внешнюю ссылку.
+        # Вместо нее handler покажет Telegram-кнопку "Тестовая оплата",
+        # которая просто переведет заявку в paid через внутренний callback.
+        if settings.is_dev:
+            return None
+
+        # В production здесь позже будет API-запрос на создание платежа.
+        # Пока оставляем стабильную ссылку-заглушку, чтобы интерфейс не ломался
+        # до подключения реального провайдера.
         #
         # Для официальной оплаты в РФ лучше делать так:
         # 1. создать платеж на сервере через API провайдера, например ЮKassa;

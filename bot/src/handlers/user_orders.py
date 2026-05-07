@@ -474,7 +474,7 @@ async def pay_order(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(order_text, reply_markup=None)
     await callback.message.answer(
         f"Оплата заявки <code>{order.id}</code>.",
-        reply_markup=payment_keyboard(order.payment_url or ""),
+        reply_markup=payment_keyboard(order.id, order.payment_url),
     )
     await state.update_data(
         payment_order_id=order.id,
@@ -486,6 +486,52 @@ async def pay_order(callback: CallbackQuery, state: FSMContext) -> None:
         extra={"order_id": order.id, "user_id": callback.from_user.id},
     )
     await callback.answer()
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("payment:dev_success:"))
+async def dev_payment_success(callback: CallbackQuery, state: FSMContext) -> None:
+    # Dev-заглушка оплаты.
+    #
+    # В локальном режиме кнопка "Тестовая оплата" имитирует успешный платеж:
+    # заявка сразу получает статус paid, пользователь видит обновленную карточку,
+    # а админ-чат получает уведомление. В production сервис запретит этот путь,
+    # потому что реальные оплаты должны подтверждаться webhook'ом провайдера.
+    if not callback.data or not callback.from_user:
+        await callback.answer("Некорректная команда.", show_alert=True)
+        return
+
+    order_id = _parse_order_id(callback.data)
+    if order_id is None:
+        await callback.answer("Некорректная заявка.", show_alert=True)
+        return
+
+    async with SessionLocal() as session:
+        service = OrderService(session)
+        try:
+            order = await service.mark_paid_by_dev_stub(order_id, callback.from_user.id)
+        except ValueError as error:
+            await callback.answer(str(error), show_alert=True)
+            return
+
+        user_text = service.format_order_menu(order)
+
+    if callback.message:
+        await callback.message.edit_text(
+            f"Тестовая оплата заявки <code>{order.id}</code> прошла успешно.",
+            reply_markup=None,
+        )
+        await callback.message.answer(user_text)
+
+    await bot.send_message(
+        chat_id=settings.admin_chat_id,
+        text=f"Заявка #{order.id} отмечена как оплаченная через dev-заглушку.",
+    )
+    logger.info(
+        "User completed dev payment stub",
+        extra={"order_id": order.id, "user_id": callback.from_user.id},
+    )
+    await state.clear()
+    await callback.answer("Тестовая оплата прошла.")
 
 
 @router.callback_query(F.data == "payment:back")
